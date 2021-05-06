@@ -16,9 +16,11 @@
 #include <linux/usb.h>
 #include <linux/mutex.h>
 
+// infos that tell the usb subsystem, which calls to redirect to this driver
 #define VENDOR_ID     0x0547       
 #define PRODUCT_ID    0x1002
-
+// minor number base to start minor numbers from
+// which are then used to identify devices from this driver in the usb subsystem
 #define MINOR_BASE    192
 
 /*********************OSR FX2 vendor commands************************/
@@ -27,6 +29,8 @@
 #define IS_HIGH_SPEED 0xD9
 
 /**********************Function prototypes***************************/
+// defining the function prototypes at the beginning of the file
+// enables us to write the functions in a logical order
 static int osrfx2_open(struct inode * inode, struct file * file);
 static int osrfx2_release(struct inode * inode, struct file * file);
 static ssize_t osrfx2_read(struct file * file, char * buffer, size_t count, loff_t * ppos);
@@ -42,11 +46,14 @@ static ssize_t set_bargraph(struct device * dev, struct device_attribute *attr, 
 
 /***********************Module structures****************************/
 /*Table of devices that work with this driver*/
+// transforms vendor and product id from defines at top of this file to
+// a subsystem-compatible format, the structure usb_device_id
 static const struct usb_device_id osrfx2_id_table [] = {
-    { USB_DEVICE( VENDOR_ID, PRODUCT_ID ) },
+    { USB_DEVICE(VENDOR_ID, PRODUCT_ID) },
     { },
 };
 
+// makro to set it as the device table of this kernel module
 MODULE_DEVICE_TABLE(usb, osrfx2_id_table);
 
 /*OSR FX2 private device context structure*/
@@ -91,6 +98,7 @@ struct osrfx2 {
     struct mutex io_mutex;          /*used during cleanup after disconnect*/
 };
 
+// basically the API of this driver, all the functions it provides for userspace applications
 static const struct file_operations osrfx2_fops = {
     .owner   = THIS_MODULE,
     .open    = osrfx2_open,
@@ -99,6 +107,7 @@ static const struct file_operations osrfx2_fops = {
     .write   = osrfx2_write,
 };
 
+// the main usb driver structure which contains its usb methods and id table (and of course the name)
 static struct usb_driver osrfx2_driver = {
     .name        = "osrfx2",
     .probe       = osrfx2_probe,
@@ -121,23 +130,32 @@ static struct usb_class_driver osrfx2_class = {
 static DEVICE_ATTR(bargraph, 0660, get_bargraph, set_bargraph);
 
 /*insmod*/
+// the driver's init function called on insmod
 int init_module(void) {
     int retval;
 
     retval = usb_register(&osrfx2_driver);
 
-    if(retval)
+	// if the return value from registering is not 0, we know we got an error
+    if(retval != 0)
         pr_err("usb_register failed. Error number %d", retval);
 
     return retval;
 }
 
 /*rmmod*/
+// the driver's exit function called on rmmod
 void cleanup_module(void) {
     usb_deregister(&osrfx2_driver);
 }
 
+// the probe function that the usb subsystem calls when the usb controller registers a new usb device
+// that matches the usb vendor id and product id associated with this driver
+// it initialises the device and endpoints 
 static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id * id) {
+	// takes the interface it got passed from the usb subsystem and makes it a usb device
+	// which can then be used for some function calls to the usb core
+	// it might work without the conversion now, meaning those calls might also support being passed interfaces TODO: try that out
     struct usb_device *udev = interface_to_usbdev(intf);
     struct osrfx2 *fx2dev = NULL;
     struct usb_endpoint_descriptor *endpoint;
