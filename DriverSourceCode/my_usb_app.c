@@ -20,45 +20,6 @@
 #define CHAR_BUF_LEN 32
 #define SLEEP_TIME 200000L
 
-static char *get_switches_state(void) {    
-    const char *attrname = "/sys/class/usbmisc/osrfx2_0/device/switches";   
-    char        attrvalue[BUF_LEN] = {0};
-    int         fd, count;
-
-    fd = open(attrname, O_RDONLY);
-    if (fd == -1) {
-        fprintf(stderr, "Error opening %s\n", attrname);
-        return NULL;
-    }
-
-    count = read(fd, &attrvalue, sizeof(attrvalue));
-    close(fd);
-    if (count == 8)
-        return strdup(attrvalue);
-
-    return NULL;
-}
-
-static char *get_7segment_state(void) {    
-    const char *attrname = "/sys/class/usbmisc/osrfx2_0/device/7segment";   
-    char        attrvalue[BUF_LEN] = {0};
-    int         fd, count;
-
-    fd = open(attrname, O_RDONLY);
-    if (fd == -1) {
-        fprintf(stderr, "Error opening %s\n", attrname);
-        return NULL;
-    }
-
-    count = read(fd, &attrvalue, sizeof(attrvalue));
-    close(fd);
-    if (count == 8) {
-        return strdup(attrvalue);
-    }
-
-    return NULL;
-}
-
 static char *get_bargraph_state(void) {    
     const char *attrname = "/sys/class/usbmisc/osrfx2_0/device/bargraph";   
     char        attrvalue[BUF_LEN] = {0};
@@ -77,26 +38,6 @@ static char *get_bargraph_state(void) {
     }
 
     return NULL;
-}
-
-static int set_7segment_state(unsigned char value) {
-    const char *attrname = "/sys/class/usbmisc/osrfx2_0/device/7segment";
-    char attrvalue [32];
-    int  fd, count, len;
-    
-    snprintf(attrvalue, sizeof(attrvalue), "%d", value);
-    len = strlen(attrvalue) + 1;
-
-    fd = open( attrname, O_WRONLY );
-    if (fd == -1)
-        return -1;
-
-    count = write( fd, &attrvalue, len );
-    close(fd);
-    if (count != len)
-        return -1;
-
-    return 0;
 }
 
 static int set_bargraph_state(unsigned char value) {
@@ -130,7 +71,6 @@ int main(void) {
     unsigned int packet_num = 0;
     int index = 0;
 
-    unsigned char seg7_pattern[] = {0x01, 0x02 | 0x80, 0x04, 0x08 | 0x80, 0x10, 0x20 | 0x80};
     unsigned char bar_pattern [] = {0x01 | 0x80, 0x02 | 0x40, 0x04 | 0x20, 0x08 | 0x10, 0x04 | 0x20, 0x02 | 0x40};
 
     wfd = open(devpath, O_WRONLY | O_NONBLOCK);
@@ -146,19 +86,15 @@ int main(void) {
     }
 
     while(1) {  
-        strcpy(this_sw_status, get_switches_state());
  
         /*Report switch changes and current component states*/
         if(strcmp(last_sw_status, this_sw_status)) {
-            fprintf(stdout, "Switch status:    %s\n", this_sw_status);
-            fprintf(stdout, "7 segment status: %s\n", get_7segment_state());
             fprintf(stdout, "Bargraph status:  %s\n", get_bargraph_state());
             fprintf(stdout, "\n");
             strcpy(last_sw_status, this_sw_status);
         }
 
-        /*Update 7 segment and bargraph displays*/
-        set_7segment_state(seg7_pattern[index % SEG_LEN]);
+        /*Update and bargraph display*/
         set_bargraph_state(bar_pattern [index % BAR_LEN]);
     //set_bargraph_state(0x80);
         index++;
