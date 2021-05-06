@@ -37,7 +37,6 @@ static int osrfx2_suspend(struct usb_interface * intf, pm_message_t message);
 static int osrfx2_resume(struct usb_interface * intf);
 static void osrfx2_delete(struct kref * kref);
 static void write_bulk_callback(struct urb *urb);
-static void interrupt_handler(struct urb * urb);
 static ssize_t get_bargraph(struct device *dev, struct device_attribute *attr, char *buf);
 static ssize_t set_bargraph(struct device * dev, struct device_attribute *attr, const char *buf,size_t count);
 
@@ -512,27 +511,6 @@ static void write_bulk_callback(struct urb * urb) {
  
     /*Free the spent buffer*/
     usb_free_coherent( urb->dev, urb->transfer_buffer_length, urb->transfer_buffer, urb->transfer_dma );
-}
-
-/*DIP switch interrupt handler*/
-static void interrupt_handler(struct urb * urb) {
-    struct osrfx2 *fx2dev = urb->context;
-    unsigned char *buf = urb->transfer_buffer;
-    int retval;
-
-    if (urb->status == 0) {
-
-        wake_up(&(fx2dev->FieldEventQueue)); /*Wake-up any requests enqueued*/
-
-        retval = usb_submit_urb(urb, GFP_ATOMIC); /*Restart interrupt urb*/
-        if (retval != 0)
-            dev_err(&urb->dev->dev, "%s - error %d submitting interrupt urb\n", __FUNCTION__, retval);
-
-        return; /*Success*/   
-    }
-
-    /*Error*/
-    dev_err(&urb->dev->dev, "%s - non-zero urb status received: %d\n", __FUNCTION__, urb->status);
 }
 
 /*Gets the LED bargraph status on the device*/
