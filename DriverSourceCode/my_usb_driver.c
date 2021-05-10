@@ -162,7 +162,7 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
         retval = -ENOMEM; // memory error
         dev_err(&intf->dev, "OSR USB-FX2 device probe failed: %d.\n", retval);
         if (fx2dev != 0) { // if error code returned from allocation
-        	kref_put(&fx2dev->kref, osrfx2_delete); // clears reference counter and free ressources 
+        	kref_put(&fx2dev->kref, osrfx2_delete); // decrements usage count and free ressources 
         }
         return retval;
     }
@@ -193,7 +193,7 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
     retval = device_create_file(&intf->dev, &dev_attr_bargraph);
     if (retval != 0) {
         dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
-        // if the context struct is now faulty, clean up
+        // if the context struct is now faulty, decrement usage count and clean up
         if (fx2dev != 0) {
         	kref_put(&fx2dev->kref, osrfx2_delete);
         }
@@ -227,7 +227,7 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
     ) {
         retval = -ENODEV;
         dev_err(&intf->dev, "OSR FX2 device probe failed: %d\n", retval);
-        // if device context structure is faulty now, clean up
+        // if device context structure is faulty now, decrement usage count and clean up
         if (fx2dev != 0) {
         	kref_put(&fx2dev->kref, osrfx2_delete);
         }
@@ -254,7 +254,7 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
     if (!fx2dev->bulk_out_buffer) {
         retval = -ENOMEM;
         dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
-        // if device context structure is faulty now, clean up
+        // if device context structure is faulty now, decrement usage count and clean up
         if (fx2dev != 0) {
         	kref_put(&fx2dev->kref, osrfx2_delete);
         }
@@ -276,10 +276,16 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
     return 0;
 }
 
+// this method gets called when the board is disconnected from the computer
+// the usb subsystem calls the disconnect method of its driver
+// which then cleans up all references and ressources allocated for this
+// device instance
 static void osrfx2_disconnect(struct usb_interface * intf) {
     struct osrfx2 * fx2dev;
 
+	// get saved data from interface back and save it in context struct
     fx2dev = usb_get_intfdata(intf);
+    // clear interface by setting data to NULL
     usb_set_intfdata(intf, NULL);
 
     /*Give back minor*/
@@ -287,6 +293,7 @@ static void osrfx2_disconnect(struct usb_interface * intf) {
 
     /*Prevent more I/O from starting*/
     mutex_lock(&fx2dev->io_mutex);
+    // also set interface attribute of context struct to NULL
     fx2dev->interface = NULL;
     mutex_unlock(&fx2dev->io_mutex);
 
@@ -294,7 +301,8 @@ static void osrfx2_disconnect(struct usb_interface * intf) {
     device_remove_file(&intf->dev, &dev_attr_bargraph);
 
     /*Decrement usage count*/
-    kref_put( &fx2dev->kref, osrfx2_delete );
+    // and free ressources
+    kref_put(&fx2dev->kref, osrfx2_delete);
 
     dev_info(&intf->dev, "OSR FX2 disconnected.\n");
 }
