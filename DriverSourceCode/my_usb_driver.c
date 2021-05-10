@@ -62,25 +62,20 @@ struct osrfx2 {
     struct usb_interface * interface;       /* the interface for this device */    
     
     wait_queue_head_t FieldEventQueue;      /*Queue for poll and irq methods*/    
-   
-    unsigned char * int_in_buffer;      
+        
     unsigned char * bulk_in_buffer;     /*Transfer Buffers*/
     unsigned char * bulk_out_buffer;        
     
-    size_t int_in_size;
     size_t bulk_in_size;            /*Buffer sizes*/
     size_t bulk_out_size;
     
-    __u8  int_in_endpointAddr;
     __u8  bulk_in_endpointAddr;         /*USB endpoints*/
     __u8  bulk_out_endpointAddr;
     
-    __u8  int_in_endpointInterval;
     __u8  bulk_in_endpointInterval;     /*Endpoint intervals*/
     __u8  bulk_out_endpointInterval;
     
-    struct urb * bulk_in_urb;
-    struct urb * int_in_urb;            /*URBs*/
+    struct urb * bulk_in_urb;           /*URBs*/
     struct urb * bulk_out_urb;
     
     struct kref kref;               /*Reference counter*/
@@ -219,15 +214,9 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
             fx2dev->bulk_out_endpointInterval = endpoint->bInterval;
             fx2dev->bulk_out_size = endpoint->wMaxPacketSize;
         }
-        if(usb_endpoint_is_int_in(endpoint)) { /*Interrupt in*/
-            fx2dev->int_in_endpointAddr = endpoint->bEndpointAddress;
-            fx2dev->int_in_endpointInterval = endpoint->bInterval;
-            fx2dev->int_in_size = endpoint->wMaxPacketSize;
-        }
     }
     /*Error if incorrect number of endpoints found*/
-    if (fx2dev->int_in_endpointAddr   == 0 ||
-        fx2dev->bulk_in_endpointAddr  == 0 ||
+    if (fx2dev->bulk_in_endpointAddr  == 0 ||
         fx2dev->bulk_out_endpointAddr == 0) {
         retval = -ENODEV;
         dev_err(&intf->dev, "OSR FX2 device probe failed: %d\n", retval);
@@ -276,9 +265,6 @@ static void osrfx2_disconnect(struct usb_interface * intf) {
     fx2dev->interface = NULL;
     mutex_unlock(&fx2dev->io_mutex);
 
-    /*Release interrupt urb resources*/
-    usb_kill_urb(fx2dev->int_in_urb);
-
     /*Remove sysfs files*/
     device_remove_file(&intf->dev, &dev_attr_bargraph);
 
@@ -294,10 +280,6 @@ static void osrfx2_delete(struct kref * kref) {
 
     usb_put_dev(fx2dev->udev);
     
-    if (fx2dev->int_in_urb)
-        usb_free_urb(fx2dev->int_in_urb);
-    if (fx2dev->int_in_buffer)
-        kfree(fx2dev->int_in_buffer);
     if (fx2dev->bulk_in_buffer)
         kfree(fx2dev->bulk_in_buffer);
     if (fx2dev->bulk_out_buffer)
@@ -314,9 +296,6 @@ static int osrfx2_suspend(struct usb_interface * intf, pm_message_t message) {
         return -ERESTARTSYS;
 
     fx2dev->suspended = 1;
-     
-    /*Stop the interrupt pipe read urb*/
-    usb_kill_urb(fx2dev->int_in_urb);
 
     up(&fx2dev->sem);
 
@@ -333,9 +312,6 @@ static int osrfx2_resume(struct usb_interface * intf) {
         return -ERESTARTSYS;
     
     fx2dev->suspended = 0;
-     
-     /*Re-start the interrupt pipe read urb*/
-    retval = usb_submit_urb( fx2dev->int_in_urb, GFP_KERNEL );
     
     if (retval) {
         dev_err(&intf->dev, "%s - usb_submit_urb failed %d\n", __FUNCTION__, retval);
