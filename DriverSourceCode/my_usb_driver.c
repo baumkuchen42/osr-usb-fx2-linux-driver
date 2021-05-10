@@ -127,6 +127,7 @@ static struct usb_class_driver osrfx2_class = {
 
 /***********************Module functions*****************************/
 /*Create device attribute bargraph*/
+// arguments: name, mode, getter, setter
 static DEVICE_ATTR(bargraph, 0660, get_bargraph, set_bargraph);
 
 /*insmod*/
