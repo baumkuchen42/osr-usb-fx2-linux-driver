@@ -201,9 +201,13 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
     }
 
     /*Set up the endpoint information*/
+    // set up as many endpoints as specified in the current altsetting description of the interface
     for (i = 0; i < intf->cur_altsetting->desc.bNumEndpoints; i++) {
+    	// type and other attributes of endpoint are specified in description in endpoint list
         endpoint = &intf->cur_altsetting->endpoint[i].desc;
 
+		// uses usb subsystem method to find out type of endpoint,
+		// then creates endpoint in context struct with given attributes from interface
         if(usb_endpoint_is_bulk_in(endpoint)) { /*Bulk in*/
             fx2dev->bulk_in_endpointAddr = endpoint->bEndpointAddress;
             fx2dev->bulk_in_endpointInterval = endpoint->bInterval;
@@ -216,32 +220,53 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
         }
     }
     /*Error if incorrect number of endpoints found*/
-    if (fx2dev->bulk_in_endpointAddr  == 0 ||
-        fx2dev->bulk_out_endpointAddr == 0) {
+    // basically if no endpoints were created at all
+    if (
+    	fx2dev->bulk_in_endpointAddr  == 0 ||
+        fx2dev->bulk_out_endpointAddr == 0
+    ) {
         retval = -ENODEV;
         dev_err(&intf->dev, "OSR FX2 device probe failed: %d\n", retval);
-        if (fx2dev) kref_put( &fx2dev->kref, osrfx2_delete );
+        // if device context structure is faulty now, clean up
+        if (fx2dev != 0) {
+        	kref_put(&fx2dev->kref, osrfx2_delete);
+        }
         return retval;
     }
 
     /*Initialize bulk endpoint buffers*/
+    // first allocate space in kernel space
     fx2dev->bulk_in_buffer = kmalloc(fx2dev->bulk_in_size, GFP_KERNEL);
+    // if allocated space is NULL, go into error routine
     if (!fx2dev->bulk_in_buffer) {
         retval = -ENOMEM;
         dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
-        if (fx2dev) kref_put(&fx2dev->kref, osrfx2_delete);
+        // if device context structure is faulty now, clean up
+        if (fx2dev != 0) {
+        	kref_put(&fx2dev->kref, osrfx2_delete);
+        }
         return retval;
     }
+    
+    // first allocate space in kernel space
     fx2dev->bulk_out_buffer = kmalloc(fx2dev->bulk_out_size, GFP_KERNEL);
+    // if allocated space is NULL, go into error routine
     if (!fx2dev->bulk_out_buffer) {
         retval = -ENOMEM;
         dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
-        if (fx2dev) kref_put(&fx2dev->kref, osrfx2_delete);
+        // if device context structure is faulty now, clean up
+        if (fx2dev != 0) {
+        	kref_put(&fx2dev->kref, osrfx2_delete);
+        }
         return retval;
     }
 
     /*Register device*/
+    // finally, after all attributes are set and/or initialised, register the usb device
+    // at the usb subsystem with the interface given by poll and the class defined at the
+    // top of this file
     retval = usb_register_dev(intf, &osrfx2_class);
+    // if the registering didn't work, this particular interface is invalid, so set to NULL
     if (retval != 0) {
         usb_set_intfdata(intf, NULL);
     }
