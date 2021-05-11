@@ -337,27 +337,12 @@ static int osrfx2_suspend(struct usb_interface * intf, pm_message_t message) {
 
 /*Wake up device*/
 static int osrfx2_resume(struct usb_interface * intf) {
-
-    int retval;
     struct osrfx2 * fx2dev = usb_get_intfdata(intf);
 
     if (down_interruptible(&fx2dev->sem))
         return -ERESTARTSYS;
     
     fx2dev->suspended = 0;
-    
-    if (retval) {
-        dev_err(&intf->dev, "%s - usb_submit_urb failed %d\n", __FUNCTION__, retval);
-
-        switch (retval) {
-        case -EHOSTUNREACH:
-            dev_err(&intf->dev, "%s - EHOSTUNREACH probable cause: "
-                    "parent hub/port still suspended.\n", __FUNCTION__);
-        default:
-            break;
-
-        }
-    }
     
     up(&fx2dev->sem);
 
