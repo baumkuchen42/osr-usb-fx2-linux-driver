@@ -309,41 +309,65 @@ static void osrfx2_disconnect(struct usb_interface * intf) {
 
 /*Delete resources used by this device*/
 static void osrfx2_delete(struct kref * kref) {
+	// get the context structure that contains the reference
     struct osrfx2 *fx2dev = container_of(kref, struct osrfx2, kref);
 
+	// releases the use of the usb device structure
     usb_put_dev(fx2dev->udev);
     
-    if (fx2dev->bulk_in_buffer)
+    // frees memory allocated for bulk in buffer
+    if (fx2dev->bulk_in_buffer) {
         kfree(fx2dev->bulk_in_buffer);
-    if (fx2dev->bulk_out_buffer)
+    }
+    // frees memory allocated for bulk out buffer
+    if (fx2dev->bulk_out_buffer) {
         kfree(fx2dev->bulk_out_buffer);
-
+	}
+	// frees memory allocated for device context structure, thus deleting it
     kfree(fx2dev);
 }
 
 /*Suspend device*/
+// when the kernel thinks the device is not doing anything important and it
+// wants to save energy, it sends a suspend command to the device, then
+// this method is called
 static int osrfx2_suspend(struct usb_interface * intf, pm_message_t message) {
     struct osrfx2 * fx2dev = usb_get_intfdata(intf);
 
-    if (down_interruptible(&fx2dev->sem))
+	// tries to acquire the semaphore, error if not successful
+	// sleeps if no more tasks are allowed to acquire the semaphore
+	// sleep can be interrupted by interrupt
+	// this means that suspending is really only possible no other
+	// method is accessing the context structure so the device
+	// is really not busy
+    if (down_interruptible(&fx2dev->sem) != 0) {
         return -ERESTARTSYS;
+    }    
 
+	// set suspended flag in context structure
     fx2dev->suspended = 1;
 
+	// release the semaphore again
     up(&fx2dev->sem);
 
     return 0;
 }
 
 /*Wake up device*/
+// gets called when device is resumed again by power management
 static int osrfx2_resume(struct usb_interface * intf) {
+    // get context structure from interface where it was saved as data
     struct osrfx2 * fx2dev = usb_get_intfdata(intf);
 
-    if (down_interruptible(&fx2dev->sem))
+	// tries to get access to context structure
+    if (down_interruptible(&fx2dev->sem) != 0) {
         return -ERESTARTSYS;
+    }
     
+    // set suspended flag in context
     fx2dev->suspended = 0;
     
+    // release the semaphore again
     up(&fx2dev->sem);
 
     return 0;
