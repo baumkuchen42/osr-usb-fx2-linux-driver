@@ -380,22 +380,35 @@ static int osrfx2_open(struct inode * inode, struct file * file) {
     int retval;
     int flags;
     
+    // get interface from inode, first minor number from inode
     interface = usb_find_interface(&osrfx2_driver, iminor(inode));
-    if (!interface) return -ENODEV;
+    // if interface extraction failed, return no device error
+    if (!interface) {
+    	return -ENODEV;
+    }
 
+	// get context structure from data saved in interface
     fx2dev = usb_get_intfdata(interface);
-    if (!fx2dev) return -ENODEV;
+    // return no device error if context structure extraction failed
+    if (!fx2dev) {
+    	return -ENODEV;
+    }
 
     /*Serialize access to each of the bulk pipes*/
+    // get access mode flags passed with open call
     flags = (file->f_flags & O_ACCMODE);
 
+	// if device was opened for write
     if ((flags == O_WRONLY) || (flags == O_RDWR)) {
-        if (!atomic_dec_and_test( &fx2dev->bulk_write_available )) {
-            atomic_inc( &fx2dev->bulk_write_available );
+    	// check if writing is available by decrementing available bit
+        if (!atomic_dec_and_test(&fx2dev->bulk_write_available)) {
+        	// if write is not available, count up again and return busy error
+            atomic_inc(&fx2dev->bulk_write_available);
             return -EBUSY;
         }
 
         /*The write interface is serialized, so reset bulk-out pipe (ep-6)*/
+        // clear halt clears endpoint of given device
         retval = usb_clear_halt(fx2dev->udev, fx2dev->bulk_out_endpointAddr);
         if ((retval != 0) && (retval != -EPIPE)) {
             dev_err(&interface->dev, "%s - error(%d) usb_clear_halt(%02X)\n",
@@ -403,11 +416,14 @@ static int osrfx2_open(struct inode * inode, struct file * file) {
         }
     }
 
+	// if device was opened for read, routine analogous to write initialising above
     if ((flags == O_RDONLY) || (flags == O_RDWR)) {
-        if (!atomic_dec_and_test( &fx2dev->bulk_read_available )) {
-            atomic_inc( &fx2dev->bulk_read_available );
-            if (flags == O_RDWR)
-                atomic_inc( &fx2dev->bulk_write_available );
+        if (!atomic_dec_and_test(&fx2dev->bulk_read_available)) {
+            atomic_inc(&fx2dev->bulk_read_available);
+            if (flags == O_RDWR) {
+            	// also reset write available if openend for reading and writing
+                atomic_inc(&fx2dev->bulk_write_available);
+            }
             return -EBUSY;
         }
 
@@ -421,7 +437,9 @@ static int osrfx2_open(struct inode * inode, struct file * file) {
 
     /*Set this device as non-seekable*/
     retval = nonseekable_open(inode, file);
-    if (retval) return retval;
+    if (retval != 0) {
+    	return retval;
+    }
 
     /*Increment our usage count for the device*/
     kref_get(&fx2dev->kref);
@@ -433,22 +451,28 @@ static int osrfx2_open(struct inode * inode, struct file * file) {
 }
 
 /*Release device*/
+// gets called when user application closes the file again
 static int osrfx2_release(struct inode * inode, struct file * file) {
     struct osrfx2 * fx2dev;
     int flags;
 
+	// get context structure from data saved in file structure on open
     fx2dev = (struct osrfx2 *)file->private_data;
-    if (!fx2dev)
+    // return no device error if fetching didn't work
+    if (!fx2dev) {
         return -ENODEV;
+    }
 
     /*Release any bulk_[write|read]_available serialization*/
     flags = (file->f_flags & O_ACCMODE);
 
-    if ((flags == O_WRONLY) || (flags == O_RDWR))
-        atomic_inc( &fx2dev->bulk_write_available );
+    if ((flags == O_WRONLY) || (flags == O_RDWR)) {
+        atomic_inc(&fx2dev->bulk_write_available);
+    }
 
-    if ((flags == O_RDONLY) || (flags == O_RDWR))
-        atomic_inc( &fx2dev->bulk_read_available );
+    if ((flags == O_RDONLY) || (flags == O_RDWR)) {
+        atomic_inc(&fx2dev->bulk_read_available);
+    }
  
     /*Decrement the ref-count on the device instance*/
     kref_put(&fx2dev->kref, osrfx2_delete);
@@ -463,17 +487,20 @@ static ssize_t osrfx2_read(struct file * file, char * buffer, size_t count, loff
     int bytes_read;
     int pipe;
 
+	// get context structure from data saved in file structure on open
     fx2dev = (struct osrfx2 *)file->private_data;
 
     /*Initialize pipe*/
+    // create pipe/endpoint for reading at endpoint address specified in context structure
     pipe = usb_rcvbulkpipe(fx2dev->udev, fx2dev->bulk_in_endpointAddr),
 
     /*Do a blocking bulk read to get data from the device*/
+    // data is then saved in bulk in buffer
     retval = usb_bulk_msg(fx2dev->udev, pipe, fx2dev->bulk_in_buffer, min(fx2dev->bulk_in_size, count),
                           &bytes_read, 10000);
 
     /*If the read was successful, copy the data to userspace */
-    if (!retval) {
+    if (retval == 0) {
         if (copy_to_user(buffer, fx2dev->bulk_in_buffer, bytes_read))
             retval = -EFAULT;
         else
@@ -496,13 +523,18 @@ static ssize_t osrfx2_write(struct file * file, const char * user_buffer, size_t
 
     fx2dev = (struct osrfx2 *)file->private_data;
 
-    if (!count) return count;
+	// if nothing is supposed to be written, just return 0 instead of proceeding
+    if (count == 0) {
+    	return count;
+   	}
  
     /*Create a urb*/
     urb = usb_alloc_urb(0, GFP_KERNEL);
 
+	// if urb creation failed
     if(!urb) {
         retval = -ENOMEM;
+        // free space allocated with usb_alloc_coherent
         usb_free_coherent(fx2dev->udev, count, buf, urb->transfer_dma);
         usb_free_urb(urb);
         return retval;
@@ -511,6 +543,7 @@ static ssize_t osrfx2_write(struct file * file, const char * user_buffer, size_t
     /*Create urb buffer*/
     buf = usb_alloc_coherent(fx2dev->udev, count, GFP_KERNEL, &urb->transfer_dma);
 
+	// if buffer allocation failed
     if(!buf) {
         retval = -ENOMEM;
         usb_free_coherent(fx2dev->udev, count, buf, urb->transfer_dma);
@@ -519,7 +552,8 @@ static ssize_t osrfx2_write(struct file * file, const char * user_buffer, size_t
     }
 
     /*Copy the data to the buffer*/
-    if(copy_from_user(buf, user_buffer, count)) {
+    if(copy_from_user(buf, user_buffer, count) != 0) {
+    	// return general fault and free allocated space and urb if copying failed
         retval = -EFAULT;
         usb_free_coherent(fx2dev->udev, count, buf, urb->transfer_dma);
         usb_free_urb(urb);
@@ -527,14 +561,19 @@ static ssize_t osrfx2_write(struct file * file, const char * user_buffer, size_t
     }
 
     /*Initialize the urb*/
+    // initialise a pipe/endpoint for sending at out endpoint address
     pipe = usb_sndbulkpipe(fx2dev->udev, fx2dev->bulk_out_endpointAddr);
-    usb_fill_bulk_urb( urb, fx2dev->udev, pipe, buf, count, write_bulk_callback, fx2dev);
+    // fill allocated urb with context data and read data from user
+    usb_fill_bulk_urb(urb, fx2dev->udev, pipe, buf, count, write_bulk_callback, fx2dev);
+    // signifies that driver provides this DMA address, 
+    // which the host controller driver should use in preference to the transfer_buffer
     urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 
     /*Send the data out the bulk port*/
     retval = usb_submit_urb(urb, GFP_KERNEL);
 
-    if (retval) {
+	// if submitting the urb failed, free allocated space and urb and return error
+    if (retval != 0) {
         dev_err(&fx2dev->interface->dev, "%s - usb_submit_urb failed: %d\n", __FUNCTION__, retval);
         usb_free_coherent(fx2dev->udev, count, buf, urb->transfer_dma);
         usb_free_urb(urb);
