@@ -589,50 +589,71 @@ static ssize_t osrfx2_write(struct file * file, const char * user_buffer, size_t
     return count;
 }
 
+// this method gets called when writing is finished
 static void write_bulk_callback(struct urb * urb) {
     struct osrfx2 *fx2dev = (struct osrfx2 *)urb->context;
  
     /*  Filter sync and async unlink events as non-errors*/
-    if(urb->status && !(urb->status == -ENOENT || urb->status == -ECONNRESET || urb->status == -ESHUTDOWN))
+    // if an error occured which is not one of those three ones, log the error
+    if(urb->status != 0 && !(urb->status == -ENOENT || urb->status == -ECONNRESET || urb->status == -ESHUTDOWN)) {
         dev_err(&fx2dev->interface->dev, "%s - non-zero status received: %d\n", __FUNCTION__, urb->status);
+    }
  
     /*Free the spent buffer*/
     usb_free_coherent( urb->dev, urb->transfer_buffer_length, urb->transfer_buffer, urb->transfer_dma );
 }
 
 /*Gets the LED bargraph status on the device*/
+// method that gets called when device attribute bargraph is queried
 static ssize_t get_bargraph(struct device *dev, struct device_attribute *attr, char *buf) {
     struct usb_interface  *intf   = to_usb_interface(dev);
     struct osrfx2         *fx2dev = usb_get_intfdata(intf);
     int retval;
    
+    // if device is suspended, write S to buffer that was passed to
+    // write device status into and abort
     if (fx2dev->suspended) {
         return sprintf(buf, "S ");   /*Device is suspended*/
     }
 
+	// clear leds attribute first
     fx2dev->leds = 0;
 
     /*Get LED values*/
-    retval = usb_control_msg(fx2dev->udev, usb_rcvctrlpipe(fx2dev->udev, 0),
-                             READ_LEDS, USB_DIR_IN | USB_TYPE_VENDOR, 0, 0,
-                             &fx2dev->leds, sizeof(fx2dev->leds),
-                             USB_CTRL_GET_TIMEOUT);
+    // send request as control message via usb subsystem
+    retval = usb_control_msg(
+    	fx2dev->udev, // device
+    	usb_rcvctrlpipe(fx2dev->udev, 0), // pipe specifying device address
+        READ_LEDS, // request message
+        USB_DIR_IN | USB_TYPE_VENDOR, // request type: read & usb identifier
+        0, // value
+        0, // index
+        &fx2dev->leds, // attribute where results should be written to
+        sizeof(fx2dev->leds), // size of result variable
+        USB_CTRL_GET_TIMEOUT // timeout
+    );
 
     /*Fill buffer with LED status*/
-    retval = sprintf(buf, "%s%s%s%s%s%s%s%s",
-                     (fx2dev->leds & 0x10) ? "1" : "0",
-                     (fx2dev->leds & 0x08) ? "1" : "0",
-                     (fx2dev->leds & 0x04) ? "1" : "0",
-                     (fx2dev->leds & 0x02) ? "1" : "0",
-                     (fx2dev->leds & 0x01) ? "1" : "0",
-                     (fx2dev->leds & 0x80) ? "1" : "0",
-                     (fx2dev->leds & 0x40) ? "1" : "0",
-                     (fx2dev->leds & 0x20) ? "1" : "0");
+    // sprintf creates a new string representing the values of the LED array
+    retval = sprintf(
+    	buf, "%s%s%s%s%s%s%s%s",
+    	// bitwise AND of specific index in LED bit array and the array
+    	// to check if value is 1 there, if yes, set to 1 in result string
+        (fx2dev->leds & 0x10) ? "1" : "0", // 0001 0000
+        (fx2dev->leds & 0x08) ? "1" : "0", // 0000 1000
+        (fx2dev->leds & 0x04) ? "1" : "0", // 0000 0100
+        (fx2dev->leds & 0x02) ? "1" : "0", // 0000 0010
+        (fx2dev->leds & 0x01) ? "1" : "0", // 0000 0001
+        (fx2dev->leds & 0x80) ? "1" : "0", // 1000 0000
+        (fx2dev->leds & 0x40) ? "1" : "0", // 0100 0000
+        (fx2dev->leds & 0x20) ? "1" : "0" // 0010 0000
+    );
 
     return retval;
 }
 
 /*Sets the LED bargraph on the device*/
+// method that gets called when device attribute bargraph is set
 static ssize_t set_bargraph(struct device * dev, struct device_attribute *attr, const char *buf,size_t count) {
     struct usb_interface  *intf   = to_usb_interface(dev);
     struct osrfx2         *fx2dev = usb_get_intfdata(intf);
@@ -641,36 +662,56 @@ static ssize_t set_bargraph(struct device * dev, struct device_attribute *attr, 
     int retval;
     char *end;
 
+	// first clear leds attribute in context structure
     fx2dev->leds = 0;
 
     /*convert buffer to unsigned long*/
+    // buf is the start of the string, end the end and 10 the number base
+    // result is then initialised with all 1
     value = (simple_strtoul(buf, &end, 10) & 0xFF);
-    if (buf == end)
+    // if the buffer length is 0, set value to zero
+    if (buf == end) {
         value = 0;
+    }
 
-    /*Check range of value 0 =< value < 256*/    
-    if(value > 255)
+    /*Check range of value 0 =< value < 256*/   
+    // avoid overflow 
+    if(value > 255) {
         fx2dev->leds = 0;
+    }
     else { /*convert to intuitive bit system. bit 0 = bottom, bit 7 = top*/
-        fx2dev->leds |= ((value >> 3) & 0x01);
-        fx2dev->leds |= ((value >> 3) & 0x02);
-        fx2dev->leds |= ((value >> 3) & 0x04);
-        fx2dev->leds |= ((value >> 3) & 0x08);
-        fx2dev->leds |= ((value >> 3) & 0x10);
-        fx2dev->leds |= ((value << 5) & 0x20);
-        fx2dev->leds |= ((value << 5) & 0x40);
-        fx2dev->leds |= ((value << 5) & 0x80);
+    	// bitwise OR of leds with value extracted from function param at specific position
+    	// shift value three to the right and then AND with first position
+        fx2dev->leds |= ((value >> 3) & 0x01); // 8765 4321 -> 0008 7654, selecting the 4th position
+        fx2dev->leds |= ((value >> 3) & 0x02); // 8765 4321 -> 0008 7654, selecting the 5th position
+        fx2dev->leds |= ((value >> 3) & 0x04); // 8765 4321 -> 0008 7654, selecting the 6th position
+        fx2dev->leds |= ((value >> 3) & 0x08); // 8765 4321 -> 0008 7654, selecting the 7th position
+        fx2dev->leds |= ((value >> 3) & 0x10); // 8765 4321 -> 0008 7654, selecting the 8th posisition
+        // shift value 5 to the left
+        fx2dev->leds |= ((value << 5) & 0x20); // 8765 4321 -> 3210 0000, selecting the 1st position
+        fx2dev->leds |= ((value << 5) & 0x40); // 8765 4321 -> 3210 0000, selecting the 2nd position
+        fx2dev->leds |= ((value << 5) & 0x80); // 8765 4321 -> 3210 0000, selecting the 3rd position
     }
 
     /*Set LED values*/
-    retval = usb_control_msg(fx2dev->udev, usb_sndctrlpipe(fx2dev->udev, 0),
-                             SET_LEDS, USB_DIR_OUT | USB_TYPE_VENDOR, 0, 0,
-                             &fx2dev->leds, sizeof(fx2dev->leds),
-                             USB_CTRL_GET_TIMEOUT);
+    retval = usb_control_msg(
+    	fx2dev->udev, // device
+    	usb_sndctrlpipe(fx2dev->udev, 0), // pipe specifying device address
+        SET_LEDS, // request message
+        USB_DIR_OUT | USB_TYPE_VENDOR, // request type: write & usb identifier
+        0, // value
+        0, // index
+        &fx2dev->leds, // attribute where results should be written to
+        sizeof(fx2dev->leds), // size of result variable
+        USB_CTRL_GET_TIMEOUT // timeout
+    );
 
-    if (retval < 0)
+	// log error
+    if (retval < 0) {
         dev_err(&fx2dev->udev->dev, "%s - retval=%d\n", __FUNCTION__, retval);
+    }
 
+	// return how many bytes where written
     return count;
 }
 
