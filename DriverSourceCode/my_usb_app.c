@@ -20,7 +20,8 @@
 #define CHAR_BUF_LEN 32
 #define SLEEP_TIME 200000L
 
-static char *get_bargraph_state(void) {    
+// returns a pointer to the bargraph attribute value
+static char *get_bargraph_state(void) {
     const char *attrname = "/sys/class/usbmisc/osrfx2_0/device/bargraph";   
     char        attrvalue[BUF_LEN] = {0};
     int         fd, count;
@@ -34,6 +35,7 @@ static char *get_bargraph_state(void) {
     count = read(fd, &attrvalue, sizeof(attrvalue));
     close(fd);
     if (count == 8) {
+    	// returns pointer to duplicate of queried attribute value
         return strdup(attrvalue);
     }
 
@@ -45,17 +47,21 @@ static int set_bargraph_state(unsigned char value) {
     char attrvalue [32];
     int  fd, count, len;
     
+    // transforms input argument to decimal number
     snprintf(attrvalue, sizeof(attrvalue), "%d", value);
     len = strlen(attrvalue) + 1;
 
-    fd = open( attrname, O_WRONLY );
-    if (fd == -1)
+    fd = open(attrname, O_WRONLY);
+    if (fd == -1) {
         return -1;
+    }
 
-    count = write( fd, &attrvalue, len );
+    count = write(fd, &attrvalue, len);
     close(fd);
-    if (count != len)
+    // also return general error if not everything was written
+    if (count != len) {
         return -1;
+    }
 
     return 0;
 }
@@ -64,23 +70,24 @@ int main(void) {
     const char *devpath = "/dev/osrfx2_0";
     char last_sw_status[BUF_LEN] = {0};
     char this_sw_status[BUF_LEN] = {0};
-    char buf_w[CHAR_BUF_LEN];
-    char buf_r[CHAR_BUF_LEN];
+    char write_buffer[CHAR_BUF_LEN];
+    char read_buffer[CHAR_BUF_LEN];
     unsigned long int dt = 0;
-    int wfd, rfd, wlen, rlen;
+    int write_handle, read_handle, write_length, read_length;
     unsigned int packet_num = 0;
     int index = 0;
 
+	// the pattern the led lights cycle through
     unsigned char bar_pattern [] = {0x01 | 0x80, 0x02 | 0x40, 0x04 | 0x20, 0x08 | 0x10, 0x04 | 0x20, 0x02 | 0x40};
 
-    wfd = open(devpath, O_WRONLY | O_NONBLOCK);
-    if (wfd == -1) {
+    write_handle = open(devpath, O_WRONLY | O_NONBLOCK);
+    if (write_handle == -1) {
         fprintf(stderr, "open for write: %s failed\n", devpath);
         return -1;
     }
 
-    rfd = open(devpath, O_RDONLY | O_NONBLOCK);
-    if (rfd == -1) {
+    read_handle = open(devpath, O_RDONLY | O_NONBLOCK);
+    if (read_handle == -1) {
         fprintf(stderr, "open for read: %s failed\n", devpath);
         return -1;
     }
@@ -88,7 +95,7 @@ int main(void) {
     while(1) {  
  
         /*Report switch changes and current component states*/
-        if(strcmp(last_sw_status, this_sw_status)) {
+        if(strcmp(last_sw_status, this_sw_status) != 0) {
             fprintf(stdout, "Bargraph status:  %s\n", get_bargraph_state());
             fprintf(stdout, "\n");
             strcpy(last_sw_status, this_sw_status);
@@ -96,38 +103,39 @@ int main(void) {
 
         /*Update and bargraph display*/
         set_bargraph_state(bar_pattern [index % BAR_LEN]);
-    //set_bargraph_state(0x80);
         index++;
 
         /*Check if time to read/write to bulk endpoint*/
+        // sends a test packet every 5 seconds
         if(dt >= 5000000L) {
             dt = 0;
 
-            sprintf(buf_w, "Test packet %u", packet_num);
+            sprintf(write_buffer, "Test packet %u", packet_num);
 
-            printf("Writing to bulk endpoint: %s\n", buf_w);          
+            printf("Writing to bulk endpoint: %s\n", write_buffer);          
 
             /*Write to bulk endpoint*/
-            wlen = write(wfd, buf_w, strlen(buf_w));
-            if (wlen < 0) {
+            write_length = write(write_handle, write_buffer, strlen(write_buffer));
+            if (write_length < 0) {
                 fprintf(stderr, "write error\n");
                 return -1;
             }
  
             /*Initialize read buffer*/
-            memset(buf_r, 0, CHAR_BUF_LEN);
+            memset(read_buffer, 0, CHAR_BUF_LEN);
 
             /*Read from bulk endpoint*/
-            rlen = read(rfd, buf_r, strlen(buf_w));
-            if (rlen < 0) {
-                fprintf(stderr, "read error\n", rlen);
+            read_length = read(read_handle, read_buffer, strlen(write_buffer));
+            if (read_length < 0) {
+                fprintf(stderr, "read error\n", read_length);
                 return -1;
             }
 
-            printf("Read from bulk endpoint:  %s\n\n", buf_r);
+            printf("Read from bulk endpoint:  %s\n\n", read_buffer);
             packet_num++;
         }
 
+		// sleeps for certain amount of microseconds
         usleep(SLEEP_TIME);
 
         /*add elapsed sleep time to dt*/
