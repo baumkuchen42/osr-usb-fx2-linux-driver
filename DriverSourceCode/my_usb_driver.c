@@ -145,26 +145,67 @@ void cleanup_module(void) {
     usb_deregister(&osrfx2_driver);
 }
 
+// prototypes for functions used in probe
+struct osrfx2* init_context_struct(struct usb_interface* intf);
+struct usb_endpoint_descriptor* init_endpoints(struct usb_interface* intf, struct osrfx2* fx2dev);
+
 // the probe function that the usb subsystem calls when the usb controller registers a new usb device
 // that matches the usb vendor id and product id associated with this driver
 // it initialises the device and endpoints 
 static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id * id) {
 	// takes the interface it got passed from the usb subsystem and makes it a usb device
 	// which can then be used for some function calls to the usb core which only take devices, not interfaces
-    struct usb_device *udev = interface_to_usbdev(intf);
     struct osrfx2 *fx2dev = NULL; // create a new osrfx2 structure to contain all necessary info for this driver
     struct usb_endpoint_descriptor *endpoint; // also create an endpoint structure for later
-    int retval, i; // create return value variable for errors
+    int retval; // create return value variable for errors
 
-    /*Create and initialize context struct*/
+	fx2dev = init_context_struct();
+	
+	if (fx2dev == NULL) {
+		dev_err(&intf->dev, "OSR FX2 device probe failed: Context device could not be created");
+		return -1;
+	}
+
+    /*create sysfs attribute files for device components.*/
+    // creates file for bargraph attribute in the device directory so applications can access it
+    retval = device_create_file(&intf->dev, &dev_attr_bargraph);
+    if (retval != 0) {
+        dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
+        // if the context struct is now faulty, decrement usage count and clean up
+        if (fx2dev != 0) {
+        	kref_put(&fx2dev->kref, osrfx2_delete);
+        }
+        return retval;
+    }
+
+    endpoint = init_endpoints();
+
+    /*Register device*/
+    // finally, after all attributes are set and/or initialised, register the usb device
+    // at the usb subsystem with the interface given by poll and the class defined at the
+    // top of this file
+    retval = usb_register_dev(intf, &osrfx2_class);
+    // if the registering didn't work, this particular interface is invalid, so set to NULL
+    if (retval != 0) {
+        usb_set_intfdata(intf, NULL);
+    }
+
+    dev_info(&intf->dev, "OSR FX2 device now attached\n");
+
+    return 0;
+}
+
+/*Create and initialize context struct*/
+struct osrfx2* init_context_struct(struct usb_interface* intf) {
+    struct usb_device *udev = interface_to_usbdev(intf);
+    
     fx2dev = kmalloc(sizeof(struct osrfx2), GFP_KERNEL); // allocates space for main driver information structure
     if (fx2dev == NULL) { // if no space allocated
-        retval = -ENOMEM; // memory error
-        dev_err(&intf->dev, "OSR USB-FX2 device probe failed: %d.\n", retval);
+        dev_err(&intf->dev, "OSR USB-FX2 device probe failed: %d.\n", -ENOMEM);
         if (fx2dev != 0) { // if error code returned from allocation
         	kref_put(&fx2dev->kref, osrfx2_delete); // decrements usage count and free ressources 
         }
-        return retval;
+        return NULL;
     }
 
     /*Zero out fx2dev struct*/
@@ -187,20 +228,15 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
     // saves a pointer to the USB driver specific interface,
     // instead of having to keep a static array of device pointers for every driver
     usb_set_intfdata(intf, fx2dev);
+    
+    return fx2dev;
+}
 
-    /*create sysfs attribute files for device components.*/
-    // creates file for bargraph attribute in the device directory so applications can access it
-    retval = device_create_file(&intf->dev, &dev_attr_bargraph);
-    if (retval != 0) {
-        dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
-        // if the context struct is now faulty, decrement usage count and clean up
-        if (fx2dev != 0) {
-        	kref_put(&fx2dev->kref, osrfx2_delete);
-        }
-        return retval;
-    }
-
-    /*Set up the endpoint information*/
+/*Set up the endpoint information*/
+struct usb_endpoint_descriptor* init_endpoints(struct usb_interface* intf, struct osrfx2* fx2dev) {
+	struct usb_endpoint_descriptor *endpoint;
+	int retval, i;
+	
     // set up as many endpoints as specified in the current altsetting description of the interface
     for (i = 0; i < intf->cur_altsetting->desc.bNumEndpoints; i++) {
     	// type and other attributes of endpoint are specified in description in endpoint list
@@ -231,7 +267,7 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
         if (fx2dev != 0) {
         	kref_put(&fx2dev->kref, osrfx2_delete);
         }
-        return retval;
+        return NULL;
     }
 
     /*Initialize bulk endpoint buffers*/
@@ -245,7 +281,7 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
         if (fx2dev != 0) {
         	kref_put(&fx2dev->kref, osrfx2_delete);
         }
-        return retval;
+        return NULL;
     }
     
     // first allocate space in kernel space
@@ -258,22 +294,10 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
         if (fx2dev != 0) {
         	kref_put(&fx2dev->kref, osrfx2_delete);
         }
-        return retval;
+        return NULL;
     }
-
-    /*Register device*/
-    // finally, after all attributes are set and/or initialised, register the usb device
-    // at the usb subsystem with the interface given by poll and the class defined at the
-    // top of this file
-    retval = usb_register_dev(intf, &osrfx2_class);
-    // if the registering didn't work, this particular interface is invalid, so set to NULL
-    if (retval != 0) {
-        usb_set_intfdata(intf, NULL);
-    }
-
-    dev_info(&intf->dev, "OSR FX2 device now attached\n");
-
-    return 0;
+    
+    return endpoint;
 }
 
 // this method gets called when the board is disconnected from the computer
