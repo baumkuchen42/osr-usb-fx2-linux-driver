@@ -68,8 +68,6 @@ static int set_bargraph_state(unsigned char value) {
 
 int main(void) {
     const char *devpath = "/dev/osrfx2_0";
-    char last_sw_status[BUF_LEN] = {0};
-    char this_sw_status[BUF_LEN] = {0};
     char write_buffer[CHAR_BUF_LEN];
     char read_buffer[CHAR_BUF_LEN];
     unsigned long int dt = 0;
@@ -94,12 +92,7 @@ int main(void) {
 
     while(1) {  
  
-        /*Report switch changes and current component states*/
-        if(strcmp(last_sw_status, this_sw_status) != 0) {
-            fprintf(stdout, "Bargraph status:  %s\n", get_bargraph_state());
-            fprintf(stdout, "\n");
-            strcpy(last_sw_status, this_sw_status);
-        }
+        fprintf(stdout, "Bargraph status:  %s\n", get_bargraph_state());
 
         /*Update and bargraph display*/
         set_bargraph_state(bar_pattern [index % BAR_LEN]);
